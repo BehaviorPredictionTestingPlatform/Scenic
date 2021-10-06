@@ -40,6 +40,8 @@ class Simulator:
             try:
                 simulation = self.createSimulation(scene, verbosity=verbosity)
                 simulation.run(maxSteps)
+                if self.is_recording():
+                    simulation.save_recordings(iterations)
             except (RejectSimulationException, RejectionException, dynamics.GuardViolation) as e:
                 if verbosity >= 2:
                     print(f'  Rejected simulation {iterations} at time step '
@@ -57,6 +59,12 @@ class Simulator:
 
     def createSimulation(self, scene, verbosity=0):
         return Simulation(scene, verbosity=verbosity)
+
+    def toggle_recording(self, record):
+        raise NotImplementedError
+
+    def is_recording(self):
+        raise NotImplementedError
 
     def destroy(self):
         pass
@@ -280,6 +288,9 @@ class Simulation:
     @property
     def currentRealTime(self):
         return self.currentTime * self.timestep
+
+    def save_recordings(self, scene_name):
+        raise NotImplementedError
 
     def destroy(self):
         """Perform any cleanup necessary to reset the simulator after a simulation."""

@@ -27,6 +27,7 @@ import struct
 import weakref
 
 import attr
+import numpy as np
 from shapely.geometry import Polygon, MultiPolygon
 
 from scenic.core.distributions import distributionFunction, distributionMethod
@@ -1119,6 +1120,133 @@ class Network:
         if road is not None:
             return road.nominalDirectionsAt(point)
         return ()
+
+    @distributionMethod
+    def toLaneGraph(self) -> dict:
+        """Convert network to lane graph as specified by LaneGCN format."""
+
+        pre_lookup, suc_lookup = dict(), dict()
+        for i, laneSec in enumerate(self.laneSections):
+            if laneSec._predecessor is not None:
+                j = self.laneSections.index(laneSec.predecessor)
+                if i not in pre_lookup:
+                    pre_lookup[i] = set()
+                pre_lookup[i].add(j)
+                if j not in suc_lookup:
+                    suc_lookup[j] = set()
+                suc_lookup[j].add(i)
+            if laneSec._successor is not None:
+                j = self.laneSections.index(laneSec.successor)
+                if i not in suc_lookup:
+                    suc_lookup[i] = set()
+                suc_lookup[i].add(j)
+                if j not in pre_lookup:
+                    pre_lookup[j] = set()
+                pre_lookup[j].add(i)
+
+        ctrs, feats = [], []
+        turn, control, intersect = [], [], []
+        pre_pairs, suc_pairs, left_pairs, right_pairs = [], [], [], []
+        for i, laneSec in enumerate(self.laneSections):
+            ctrln = np.asarray(laneSec.centerline.points)
+            num_segs = len(ctrln) - 1
+
+            ctrs.append(np.asarray((ctrln[:-1] + ctrln[1:]) / 2.0, np.float32))
+            feats.append(np.asarray(ctrln[1:] - ctrln[:-1], np.float32))
+
+            x = np.zeros((num_segs, 2), np.float32)
+            found = False
+            for intersec in self.intersections:
+                for mnv in intersec.maneuvers:
+                    if laneSec in mnv.connectingLane.sections:
+                        found = True
+                        if mnv.type is ManeuverType.RIGHT_TURN:
+                            x[:, 1] = 1
+                        elif mnv.type is ManeuverType.LEFT_TURN:
+                            x[:, 0] = 1
+                    if found:
+                        break
+                if found:
+                    break
+            turn.append(x)
+
+            # traffic control not yet supported by Network
+            control.append(False * np.ones(num_segs, np.float32))
+
+            pt = tuple(ctrln[len(ctrln) // 2])
+            is_intersection = self.intersectionAt(pt) is not None
+            intersect.append(is_intersection * np.ones(num_segs, np.float32))
+
+            if i in pre_lookup:
+                for j in pre_lookup[i]:
+                    pre_pairs.append([i, j])
+            if i in suc_lookup:
+                for j in suc_lookup[i]:
+                    suc_pairs.append([i, j])
+            if laneSec._laneToLeft is not None:
+                j = self.laneSections.index(laneSec.laneToLeft)
+                left_pairs.append([i, j])
+            if laneSec._laneToRight is not None:
+                j = self.laneSections.index(laneSec.laneToRight)
+                left_pairs.append([i, j])
+
+        node_idcs = []
+        count = 0
+        for ctr in ctrs:
+            node_idcs.append(range(count, count + len(ctr)))
+            count += len(ctr)
+        num_nodes = count
+
+        pre, suc = dict(), dict()
+        for key in ['u', 'v']:
+            pre[key], suc[key] = [], []
+        for i, laneSec in enumerate(self.laneSections):
+            idcs = node_idcs[i]
+            
+            pre['u'] += idcs[1:]
+            pre['v'] += idcs[:-1]
+            if i in pre_lookup:
+                for j in pre_lookup[i]:
+                    pre['u'].append(idcs[0])
+                    pre['v'].append(node_idcs[j][-1])
+                    
+            suc['u'] += idcs[:-1]
+            suc['v'] += idcs[1:]
+            if i in suc_lookup:
+                for j in suc_lookup[i]:
+                    suc['u'].append(idcs[-1])
+                    suc['v'].append(node_idcs[j][0])
+
+        lane_idcs = []
+        for i, idcs in enumerate(node_idcs):
+            lane_idcs.append(i * np.ones(len(idcs), np.int64))
+        lane_idcs = np.concatenate(lane_idcs, 0)
+
+        pre_pairs = np.asarray(pre_pairs, np.int64)
+        suc_pairs = np.asarray(suc_pairs, np.int64)
+        left_pairs = np.asarray(left_pairs, np.int64)
+        right_pairs = np.asarray(right_pairs, np.int64)
+
+        graph = dict()
+        graph['ctrs'] = np.concatenate(ctrs, 0)
+        graph['num_nodes'] = num_nodes
+        graph['feats'] = np.concatenate(feats, 0)
+        graph['turn'] = np.concatenate(turn, 0)
+        graph['control'] = np.concatenate(control, 0)
+        graph['intersect'] = np.concatenate(intersect, 0)
+        graph['pre'] = [pre]
+        graph['suc'] = [suc]
+        graph['lane_idcs'] = lane_idcs
+        graph['pre_pairs'] = pre_pairs
+        graph['suc_pairs'] = suc_pairs
+        graph['left_pairs'] = left_pairs
+        graph['right_pairs'] = right_pairs
+
+        for k1 in ['pre', 'suc']:
+            for k2 in ['u', 'v']:
+                graph[k1][0][k2] = np.asarray(graph[k1][0][k2], np.int64)
+
+        return graph
 
     def show(self):
         """Render a schematic of the road network for debugging.

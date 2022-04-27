@@ -57,7 +57,7 @@ For example, suppose we write::
 
 	ego = Object at VerifaiRange(5, 15) @ 0
 
-This is equivalent to the ordinary Scenic line ``ego = Object at (5, 15) @ 0``,
+This is equivalent to the ordinary Scenic line :samp:`ego = Object at Range(5, 15) @ 0`,
 except that the X coordinate of the ego is sampled by VerifAI within the range
 (5, 15) instead of being uniformly distributed over it. By default the
 `VerifaiSampler` uses VerifAI's `Halton`_ sampler, so the range will still be
@@ -145,7 +145,7 @@ class ExternalSampler:
 		Args:
 			feedback: Feedback from the last sample (for active samplers).
 		"""
-		self.cachedSample, self.cachedInfo = self.nextSample(feedback)
+		self.cachedSample = self.nextSample(feedback)
 
 	def nextSample(self, feedback):
 		"""Actually do the sampling. Implemented by subclasses."""
@@ -218,9 +218,11 @@ class VerifaiSampler(ExternalSampler):
 			samplerParams.cont.buckets = cont_buckets
 			samplerParams.cont.dist = numpy.array(cont_dists)
 			samplerParams.disc.dist = numpy.array(disc_dists)
-		_, sampler = verifai.server.choose_sampler(space, samplerType,
-		                                           sampler_params=samplerParams)
-		self.sampler = sampler
+		data = verifai.server.choose_sampler(space, samplerType,
+		                                     sampler_params=samplerParams)
+		if not data:
+			raise RuntimeError(f'Unknown VerifAI sampler type "{samplerType}"')
+		self.sampler = data[1]
 
 		# default rejection feedback is positive so cross-entropy sampler won't update;
 		# for other active samplers an appropriate value should be set manually
@@ -282,7 +284,7 @@ class VerifaiParameter(ExternalParameter):
 class VerifaiRange(VerifaiParameter):
 	"""A :obj:`~scenic.core.distributions.Range` (real interval) sampled by VerifAI."""
 
-	defaultValueType = float
+	_defaultValueType = float
 
 	def __init__(self, low, high, buckets=None, weights=None):
 		import verifai.features
@@ -308,7 +310,7 @@ class VerifaiRange(VerifaiParameter):
 class VerifaiDiscreteRange(VerifaiParameter):
 	"""A :obj:`~scenic.core.distributions.DiscreteRange` (integer interval) sampled by VerifAI."""
 
-	defaultValueType = float
+	_defaultValueType = float
 
 	def __init__(self, low, high, weights=None):
 		import verifai.features

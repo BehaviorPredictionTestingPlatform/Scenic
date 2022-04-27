@@ -360,24 +360,48 @@ class Road(LinearElement):
     cause the `Road` to be partitioned into multiple road sections, within which
     the configuration of lanes is fixed.
     """
+    #: All lanes of this road, in either direction.
+    #:
+    #: The order of the lanes is arbitrary. To access lanes in order according to their
+    #: geometry, use `LaneGroup.lanes`.
     lanes: Tuple[Lane]
-    forwardLanes: Union[LaneGroup, None]    # lanes aligned with the direction of the road
+
+    #: Group of lanes aligned with the direction of the road, if any.
+    forwardLanes: Union[LaneGroup, None]
+    #: Group of lanes going in the opposite direction, if any.
     backwardLanes: Union[LaneGroup, None]   # lanes going the other direction
+
+    #: All LaneGroups of this road, with `forwardLanes` being first if it exists.
     laneGroups: Tuple[LaneGroup] = None
-    sections: Tuple[RoadSection]    # sections in order from start to end
+
+    #: All sections of this road, ordered from start to end.
+    sections: Tuple[RoadSection]
 
     signals: Tuple[Signal]
 
-    crossings: Tuple[PedestrianCrossing] = ()    # ordered from start to end
+    #: All crosswalks of this road, ordered from start to end.
+    crossings: Tuple[PedestrianCrossing] = ()
+
+    #: All sidewalks of this road, with the one adjacent to `forwardLanes` being first.
+    sidewalks: Tuple[Sidewalk] = None
+    #: Possibly-empty region consisting of all sidewalks of this road.
+    sidewalkRegion: PolygonalRegion = None
 
     def __attrs_post_init__(self):
         super().__attrs_post_init__()
         lgs = []
+        sidewalks = []
         if self.forwardLanes:
             lgs.append(self.forwardLanes)
+            if self.forwardLanes._sidewalk:
+                sidewalks.append(self.forwardLanes._sidewalk)
         if self.backwardLanes:
             lgs.append(self.backwardLanes)
+            if self.backwardLanes._sidewalk:
+                sidewalks.append(self.backwardLanes._sidewalk)
         self.laneGroups = tuple(lgs)
+        self.sidewalks = tuple(sidewalks)
+        self.sidewalkRegion = PolygonalRegion.unionAll(sidewalks)
 
     def _defaultHeadingAt(self, point):
         point = _toVector(point)
@@ -699,8 +723,12 @@ class Intersection(NetworkElement):
 
 @attr.s(auto_attribs=True, kw_only=True, repr=False)
 class Signal:
-    """Traffic lights, stop signs, etc."""
-    # WARNING: Signal parsing is a work in progress and the API is likely to change in the future.
+    """Traffic lights, stop signs, etc.
+
+    .. warning::
+
+        Signal parsing is a work in progress and the API is likely to change in the future.
+    """
 
     uid: str = None
     #: ID number as in OpenDRIVE (unique ID of the signal within the database)
@@ -712,7 +740,7 @@ class Signal:
 
     @property
     def isTrafficLight(self) -> bool:
-        """bool: Whether or not this signal is a traffic light."""
+        """Whether or not this signal is a traffic light."""
         return self.type == "1000001"
 
 @attr.s(auto_attribs=True, kw_only=True, repr=False)
@@ -723,6 +751,8 @@ class Network:
 
     Networks are composed of roads, intersections, sidewalks, etc., which are all
     instances of `NetworkElement`.
+
+    Road networks can be loaded from standard formats using `Network.fromFile`.
     """
 
     #: All network elements, indexed by unique ID.
@@ -838,7 +868,7 @@ class Network:
 
         :meta private:
         """
-        return 16
+        return 17
 
     class DigestMismatchError(Exception):
         """Exception raised when loading a cached map not matching the original file."""
@@ -1252,7 +1282,7 @@ class Network:
         """Render a schematic of the road network for debugging.
 
         If you call this function directly, you'll need to subsequently call
-        ``matplotlib.pyplot.show()`` to actually display the diagram.
+        `matplotlib.pyplot.show` to actually display the diagram.
         """
         import matplotlib.pyplot as plt
         self.walkableRegion.show(plt, style='-', color='#00A0FF')

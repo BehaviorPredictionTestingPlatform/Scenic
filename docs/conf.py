@@ -38,7 +38,7 @@ import scenic.simulators.lgsvl.model
 # -- Project information -----------------------------------------------------
 
 project = 'Scenic'
-copyright = '2021, Daniel J. Fremont.'
+copyright = '2022, Daniel J. Fremont.'
 author = 'Daniel J. Fremont, Edward Kim, Tommaso Dreossi, Shromona Ghosh, Xiangyu Yue, Alberto L. Sangiovanni-Vincentelli, and Sanjit A. Seshia'
 
 
@@ -50,6 +50,7 @@ author = 'Daniel J. Fremont, Edward Kim, Tommaso Dreossi, Shromona Ghosh, Xiangy
 extensions = [
 'sphinx.ext.autodoc',
 'sphinx.ext.autosummary',
+'sphinx.ext.coverage',
 'sphinx.ext.napoleon',
 'sphinx.ext.viewcode',
 'sphinx.ext.intersphinx',
@@ -91,6 +92,9 @@ autodoc_default_options = {
 
 intersphinx_mapping = {
     'python': ('https://docs.python.org/3', None),
+    'matplotlib': ('https://matplotlib.org/stable/', None),
+    'numpy': ('https://numpy.org/doc/stable/', None),
+    'scipy': ('https://docs.scipy.org/doc/scipy/', None),
 }
 
 # -- Options for HTML output -------------------------------------------------

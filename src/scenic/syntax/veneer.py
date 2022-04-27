@@ -9,19 +9,20 @@ global state such as the list of all created Scenic objects.
 __all__ = (
 	# Primitive statements and functions
 	'ego', 'require', 'resample', 'param', 'globalParameters', 'mutate', 'verbosePrint',
-	'localPath', 'model', 'simulator', 'simulation', 'require_always', 'terminate_when',
-	'terminate_simulation_when', 'terminate_after', 'in_initial_scenario',
+	'localPath', 'model', 'simulator', 'simulation', 'require_always', 'require_eventually',
+	'terminate_when', 'terminate_simulation_when', 'terminate_after', 'in_initial_scenario',
+	'override',
 	'record', 'record_initial', 'record_final',
 	'sin', 'cos', 'hypot', 'max', 'min',
-	'filter',
+	'filter', 'str',
 	# Prefix operators
 	'Visible', 'NotVisible',
 	'Front', 'Back', 'Left', 'Right',
 	'FrontLeft', 'FrontRight', 'BackLeft', 'BackRight',
+	'RelativeHeading', 'ApparentHeading', 'RelativePosition',
+	'DistanceFrom', 'DistancePast', 'AngleTo', 'AngleFrom', 'Follow',
 	# Infix operators
-	'FieldAt', 'RelativeTo', 'OffsetAlong', 'RelativePosition',
-	'RelativeHeading', 'ApparentHeading',
-	'DistanceFrom', 'AngleTo', 'AngleFrom', 'Follow', 'CanSee',
+	'FieldAt', 'RelativeTo', 'OffsetAlong', 'CanSee',
 	# Primitive types
 	'Vector', 'VectorField', 'PolygonalVectorField',
 	'Region', 'PointSetRegion', 'RectangularRegion', 'CircularRegion', 'SectorRegion',
@@ -118,7 +119,8 @@ def isActive():
 	"""Are we in the middle of compiling a Scenic module?
 
 	The 'activity' global can be >1 when Scenic modules in turn import other
-	Scenic modules."""
+	Scenic modules.
+	"""
 	return activity > 0
 
 def activate(paramOverrides={}, modelOverride=None, filename=None, namespace=None):
@@ -223,9 +225,9 @@ def beginSimulation(sim):
 	assert currentScenario is None
 	assert not scenarioStack
 	currentSimulation = sim
-	inInitialScenario = True
 	currentScenario = sim.scene.dynamicScenario
 	runningScenarios = {currentScenario}
+	inInitialScenario = currentScenario._setup is None
 	currentScenario._bindTo(sim.scene)
 	_globalParameters = dict(sim.scene.params)
 
@@ -288,6 +290,16 @@ def executeInScenario(scenario, inheritEgo=False):
 	currentScenario = scenario
 	try:
 		yield
+	except AttributeError as e:
+		# Convert confusing AttributeErrors from trying to access nonexistent scenario
+		# variables into NameErrors, which is what the user would expect. The information
+		# needed to do this was made available in Python 3.10, but unfortunately could be
+		# wrong until 3.10.3: see bpo-46940.
+		if sys.version_info >= (3, 10, 3) and isinstance(e.obj, DynamicScenario):
+			newExc = NameError(f"name '{e.name}' is not defined", name=e.name)
+			raise newExc.with_traceback(e.__traceback__)
+		else:
+			raise
 	finally:
 		currentScenario = oldScenario
 
@@ -302,9 +314,10 @@ def finishScenarioSetup(scenario):
 def startScenario(scenario):
 	runningScenarios.add(scenario)
 
-def endScenario(scenario, reason):
+def endScenario(scenario, reason, quiet=False):
 	runningScenarios.remove(scenario)
-	verbosePrint(f'Stopping scenario {scenario} because of: {reason}', level=3)
+	if not quiet:
+		verbosePrint(f'Stopping scenario {scenario} because: {reason}', level=3)
 
 # Dynamic behaviors
 
@@ -315,6 +328,13 @@ def executeInBehavior(behavior):
 	currentBehavior = behavior
 	try:
 		yield
+	except AttributeError as e:
+		# See comment for corresponding code in executeInScenario
+		if sys.version_info >= (3, 10, 3) and isinstance(e.obj, Behavior):
+			newExc = NameError(f"name '{e.name}' is not defined", name=e.name)
+			raise newExc.with_traceback(e.__traceback__)
+		else:
+			raise
 	finally:
 		currentBehavior = oldBehavior
 
@@ -356,7 +376,7 @@ def ego(obj=None):
 				scenario._ego = obj
 	return egoObject
 
-def require(reqID, req, line, prob=1, name=None):
+def require(reqID, req, line, name, prob=1):
 	"""Function implementing the require statement."""
 	if not name:
 		name = f'requirement on line {line}'
@@ -375,34 +395,41 @@ def require(reqID, req, line, prob=1, name=None):
 		currentScenario._addRequirement(requirements.RequirementType.require,
                                         reqID, req, line, name, prob)
 
-def record(reqID, value, line, name=None):
+def record(reqID, value, line, name):
 	if not name:
 		name = f'record{line}'
 	makeRequirement(requirements.RequirementType.record, reqID, value, line, name)
 
-def record_initial(reqID, value, line, name=None):
+def record_initial(reqID, value, line, name):
 	if not name:
 		name = f'record{line}'
 	makeRequirement(requirements.RequirementType.recordInitial, reqID, value, line, name)
 
-def record_final(reqID, value, line, name=None):
+def record_final(reqID, value, line, name):
 	if not name:
 		name = f'record{line}'
 	makeRequirement(requirements.RequirementType.recordFinal, reqID, value, line, name)
 
-def require_always(reqID, req, line, name=None):
+def require_always(reqID, req, line, name):
 	"""Function implementing the 'require always' statement."""
 	if not name:
 		name = f'requirement on line {line}'
 	makeRequirement(requirements.RequirementType.requireAlways, reqID, req, line, name)
 
-def terminate_when(reqID, req, line, name=None):
+def require_eventually(reqID, req, line, name):
+	"""Function implementing the 'require eventually' statement."""
+	if not name:
+		name = f'requirement on line {line}'
+	makeRequirement(requirements.RequirementType.requireEventually, reqID, req, line, name)
+
+
+def terminate_when(reqID, req, line, name):
 	"""Function implementing the 'terminate when' statement."""
 	if not name:
 		name = f'termination condition on line {line}'
 	makeRequirement(requirements.RequirementType.terminateWhen, reqID, req, line, name)
 
-def terminate_simulation_when(reqID, req, line, name=None):
+def terminate_simulation_when(reqID, req, line, name):
 	"""Function implementing the 'terminate simulation when' statement."""
 	if not name:
 		name = f'termination condition on line {line}'
@@ -461,10 +488,25 @@ def simulator(sim):
 def in_initial_scenario():
 	return inInitialScenario
 
+def override(*args):
+	if len(args) < 1:
+		raise RuntimeParseError('"override" missing an object')
+	elif len(args) < 2:
+		raise RuntimeParseError('"override" missing a list of specifiers')
+	obj = args[0]
+	if not isinstance(obj, Object):
+		raise RuntimeParseError(f'"override" passed non-Object {obj}')
+	specs = args[1:]
+	for spec in specs:
+		if not isinstance(spec, Specifier):
+			raise RuntimeParseError(f'"override" passed non-specifier {spec}')
+
+	currentScenario._override(obj, specs)
+
 def model(namespace, modelName):
 	global loadingModel
 	if loadingModel:
-		raise RuntimeParseError(f'Scenic world model itself uses the "model" statement')
+		raise RuntimeParseError('Scenic world model itself uses the "model" statement')
 	if lockedModel is not None:
 		modelName = lockedModel
 	try:
@@ -485,10 +527,6 @@ def model(namespace, modelName):
 		for name, value in module.__dict__.items():
 			if not name.startswith('_'):
 				namespace[name] = value
-
-@distributionFunction
-def filter(function, iterable):
-	return list(builtins.filter(function, iterable))
 
 def param(*quotedParams, **params):
 	"""Function implementing the param statement."""
@@ -680,6 +718,17 @@ def DistanceFrom(X, Y=None):
 		Y = ego()
 	Y = toTypes(Y, (Vector, Region), '"distance from X to Y" with Y neither a vector nor region')
 	return X.distanceTo(Y)
+
+def DistancePast(X, Y=None):
+	"""The :samp:`distance past {vector} of {OP}` operator.
+
+	If the :samp:`of {OP}` is omitted, the ego object is used.
+	"""
+	X = toVector(X, '"distance past X" with X not a vector')
+	if Y is None:
+		Y = ego()
+	Y = toType(Y, OrientedPoint, '"distance past X of Y" with Y not an OrientedPoint')
+	return Y.distancePast(X)
 
 def AngleTo(X):
 	"""The 'angle to <vector>' operator (using the position of ego as the reference)."""
@@ -953,3 +1002,13 @@ def Following(field, dist, fromPt=None):
 	heading = field[pos]
 	val = OrientedVector.make(pos, heading)
 	return Specifier('position', val, optionals={'heading'})
+
+### Primitive functions overriding Python builtins
+
+@distributionFunction
+def filter(function, iterable):
+	return list(builtins.filter(function, iterable))
+
+@distributionFunction
+def str(*args, **kwargs):
+	return builtins.str(*args, **kwargs)

@@ -374,7 +374,8 @@ class Simulation:
 
         The default implementation returns a tuple of the positions of all objects.
         """
-        return tuple(obj.position for obj in self.objects)
+        print('HERE')
+        return tuple((obj.position.x, obj.position.y, obj.heading) for obj in self.objects)
 
     @property
     def currentRealTime(self):

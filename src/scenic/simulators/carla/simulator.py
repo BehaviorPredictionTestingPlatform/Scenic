@@ -381,6 +381,9 @@ class CarlaSimulation(DrivingSimulation):
 		)
 		return values
 
+	def currentState(self):
+		return tuple((obj.position.x, obj.position.y, obj.heading) for obj in self.objects)
+
 	def process_rgb_image(self, image, buffer):
 		image.convert(cc.Raw)
 		buffer.append(image)
